@@ -17,20 +17,22 @@ export class AppComponent {
   }
 
   public madeQuery() {
-    console.log('Start');
-    console.time("My Timer");
+    const elementNumber = 100_000;
+    const id = (Math.random() * elementNumber * 100).toFixed(0);
+
     const message = {
       name: 'hello_' + (Math.random() * 10000).toFixed(0),
       info: 'test',
-      n: 44
+      n: 44,
+      d: new Date()
     };
 
-    const elementNumber = 100_000;
 
     const messages = new Array(elementNumber).fill({}).map(() => ({
       name: 'hello_' + (Math.random() * elementNumber * 100).toFixed(0),
       info: 'test',
-      n: 44
+      n: 44,
+      d: new Date()
     })) as NonEmptyArray<typeof message>;
 
     const request: DbRequest<{ name: string, info: string, n: number }> = {
@@ -39,9 +41,16 @@ export class AppComponent {
       table: 'data',
       elements: messages
     }
-    this.indexedDbService.dbRequest(request).subscribe(() => {
-      console.log('Done');
-      console.timeEnd("My Timer");
+    console.log('Start');
+    console.time("My Timer " + id);
+    this.indexedDbService.dbRequest(request).subscribe({
+      next: () => {
+        console.log('Done');
+        console.timeEnd("My Timer " + id);
+      }, error: error => {
+        console.error(error);
+        console.timeEnd("My Timer " + id);
+      }
     });
   }
 }
