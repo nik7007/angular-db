@@ -1,7 +1,7 @@
 import Dexie, {IndexableType, Table} from "dexie";
 import {BaseTableType, DbDelete, DbInsert, DbRequest, DbUpdate, SchemaVersion} from "./indexed-db.model";
 
-class AppDB extends Dexie {
+export class AppDB extends Dexie {
   private static db?: AppDB;
 
   constructor(dbName: string, schemaVersions?: Array<SchemaVersion>) {
@@ -25,6 +25,11 @@ class AppDB extends Dexie {
     }
     return AppDB.db;
 
+  }
+
+  public static closeAndClean(): void {
+    AppDB.db?.close();
+    AppDB.db = undefined;
   }
 
   public getTable<T extends BaseTableType, K = IndexableType>(tableName: string): Table<T, K> {
