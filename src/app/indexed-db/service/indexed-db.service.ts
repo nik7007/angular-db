@@ -1,7 +1,8 @@
 import {Injectable} from '@angular/core';
 import {BaseTableType, DbRequest} from "../indexed-db.model";
-import {Observable} from "rxjs";
+import {from, Observable} from "rxjs";
 import {ThreadPool} from "../../utility/thread-pool.utility";
+import {onRequest} from "../indexed-db.util";
 
 @Injectable({
   providedIn: 'root'
@@ -13,10 +14,16 @@ export class IndexedDbService {
   }
 
   public dbRequest<T extends BaseTableType>(request: DbRequest<T>): Observable<void> {
-    if (!this.pool) {
-      this.pool = new ThreadPool<unknown, void>(() => this.workerProvider(), 5);
+    try {
+      if (!this.pool) {
+        this.pool = new ThreadPool<unknown, void>(() => this.workerProvider(), 5);
+      }
+      return this.pool.execAction(request);
+
+    } catch (e) {
+      return from(onRequest(request));
     }
-    return this.pool.execAction(request);
+
   }
 
   private workerProvider(): Observable<Worker> {
