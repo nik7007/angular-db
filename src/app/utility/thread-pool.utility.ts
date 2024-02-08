@@ -14,6 +14,8 @@ export class ThreadPool<I, O> {
 
   private readonly workers: Array<Worker> = [];
 
+  private workersNumber = 0;
+
   constructor(private readonly workerProvider: () => Observable<Worker>, private readonly threadMaxNumber: number) {
     if (typeof Worker === 'undefined') {
       throw new Error('Your system does not support web-workers!');
@@ -57,9 +59,11 @@ export class ThreadPool<I, O> {
   }
 
   private addWorker(): void {
-    if (this.workers.length >= this.threadMaxNumber) {
+    if (this.workersNumber >= this.threadMaxNumber) {
       return;
     }
+
+    this.workersNumber++;
     this.workerProvider().subscribe(worker => {
       this.workers.push(worker);
       this.workersQueue.next(worker);
