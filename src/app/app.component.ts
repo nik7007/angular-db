@@ -27,15 +27,21 @@ export class AppComponent {
       d: new Date()
     };
 
+    const search: DbRequest<typeof message> = {
+      action: 'select',
+      table: 'data',
+      filters: [{operation: 'eq', column: 'n', value: 44}]
+    }
+
 
     const messages = new Array(elementNumber).fill({}).map(() => ({
       name: 'hello_' + (Math.random() * elementNumber * 100).toFixed(0),
       info: 'test',
-      n: 44,
+      n: +(Math.random() * 1000).toFixed(0),
       d: new Date()
     })) as NonEmptyArray<typeof message>;
 
-    const request: DbRequest<{ name: string, info: string, n: number }> = {
+    const request: DbRequest<typeof message> = {
       keyName: 'name',
       action: 'merge',
       table: 'data',

@@ -1,5 +1,14 @@
 import Dexie, {IndexableType, Table} from "dexie";
-import {BaseTableType, DbDelete, DbInsert, DbRequest, DbUpdate, SchemaVersion} from "./indexed-db.model";
+import {
+  BaseTableType,
+  DbDelete,
+  DbDeleteResponse,
+  DbInsert,
+  DbRequest,
+  DbUpdate,
+  DbUpdateResponse,
+  SchemaVersion
+} from "./indexed-db.model";
 
 export class AppDB extends Dexie {
   private static db?: AppDB;
@@ -51,21 +60,31 @@ export async function onRequest<T extends BaseTableType>(request: DbRequest<T>):
   }
 }
 
-export function onInsertRequest<T extends BaseTableType>(request: DbInsert<T>): Promise<void> {
+function elementUpdated(element: IndexableType): number {
+  if (Array.isArray(element)) {
+    return element.length;
+  }
+
+  return 1;
+}
+
+export function onInsertRequest<T extends BaseTableType>(request: DbInsert<T>): Promise<DbUpdateResponse> {
   const db = AppDB.getDb();
   const {table, elements} = request;
 
   const dataTable = db.getTable(table);
 
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<DbUpdateResponse>((resolve, reject) => {
     db.transaction('rw', dataTable, async () => {
       try {
+        let elementChanged = 0;
         if (Array.isArray(elements)) {
-          await dataTable.bulkAdd(elements);
+          elementChanged += elementUpdated(await dataTable.bulkAdd(elements));
+
         } else {
-          await dataTable.add(elements);
+          elementChanged += elementUpdated(await dataTable.add(elements));
         }
-        resolve();
+        resolve({action: request.action, table: request.table, elementChanged});
       } catch (e) {
         reject(e);
       }
@@ -73,31 +92,32 @@ export function onInsertRequest<T extends BaseTableType>(request: DbInsert<T>): 
   })
 }
 
-export function onUpdateRequest<T extends BaseTableType>(request: DbUpdate<T>): Promise<void> {
+export function onUpdateRequest<T extends BaseTableType>(request: DbUpdate<T>): Promise<DbUpdateResponse> {
   const db = AppDB.getDb();
   const {keyName, table, elements} = request;
 
   const dataTable = db.getTable(table);
-  return new Promise<void>(async (resolve, reject) => {
+  return new Promise<DbUpdateResponse>(async (resolve, reject) => {
 
     db.transaction('rw', dataTable, async () => {
       try {
+        let elementChanged = 0;
         if (request.action === 'merge') {
           if (Array.isArray(elements)) {
-            await dataTable.bulkPut(elements);
+            elementChanged += elementUpdated(await dataTable.bulkPut(elements));
           } else {
-            await dataTable.put(elements);
+            elementChanged += elementUpdated(await dataTable.put(elements));
           }
         } else {
           if (Array.isArray(elements)) {
             await Promise.all(elements.map(async (element) =>
-              await dataTable.update(element[keyName], element)
+              elementChanged += elementUpdated(await dataTable.update(element[keyName], element))
             ));
           } else {
-            await dataTable.update(elements[keyName], elements);
+            elementChanged += elementUpdated(await dataTable.update(elements[keyName], elements));
           }
         }
-        resolve();
+        resolve({action: request.action, table: request.table, elementChanged});
       } catch (e) {
         reject(e);
       }
@@ -105,13 +125,13 @@ export function onUpdateRequest<T extends BaseTableType>(request: DbUpdate<T>): 
   });
 }
 
-export function odDeleteRequest<T extends BaseTableType>(request: DbDelete<T>): Promise<void> {
+export function odDeleteRequest<T extends BaseTableType>(request: DbDelete<T>): Promise<DbDeleteResponse> {
   const db = AppDB.getDb();
   const {table, key} = request;
 
   const dataTable = db.getTable(table);
 
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<DbDeleteResponse>((resolve, reject) => {
     db.transaction('rw', dataTable, async () => {
       try {
         if (Array.isArray(key)) {
@@ -119,10 +139,12 @@ export function odDeleteRequest<T extends BaseTableType>(request: DbDelete<T>): 
         } else {
           await dataTable.delete(key);
         }
-        resolve();
+        resolve({action: request.action, table: request.table});
       } catch (e) {
         reject(e);
       }
     });
   })
 }
+
+// export function onSelectRequest<T extends BaseTableType>
