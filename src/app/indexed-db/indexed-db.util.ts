@@ -1,13 +1,24 @@
-import Dexie, {IndexableType, Table} from "dexie";
+import Dexie, {Collection, IndexableType, IndexableTypeArrayReadonly, Table, WhereClause} from "dexie";
 import {
+  BaseFilter,
   BaseTableType,
+  CollectionFilter,
   DbDelete,
   DbDeleteResponse,
   DbInsert,
   DbRequest,
+  DbResponse,
+  DbSelect,
+  DbSelectResponse,
   DbUpdate,
   DbUpdateResponse,
-  SchemaVersion
+  Filter,
+  FiltersOperation,
+  LikeInterface,
+  NonEmptyArray,
+  SchemaVersion,
+  ValueFilter,
+  ValueOf
 } from "./indexed-db.model";
 
 export class AppDB extends Dexie {
@@ -47,17 +58,22 @@ export class AppDB extends Dexie {
   }
 }
 
-export async function onRequest<T extends BaseTableType>(request: DbRequest<T>): Promise<void> {
+export async function onRequest<T extends BaseTableType>(request: DbRequest<T>): Promise<DbResponse<T> | null> {
   if (request.action === 'insert') {
-    await onInsertRequest(request);
+    return await onInsertRequest(request);
   }
   if (request.action === 'update' || request.action === 'merge') {
-    await onUpdateRequest(request);
+    return await onUpdateRequest(request);
   }
 
   if (request.action === 'delete') {
-    await odDeleteRequest(request);
+    return await odDeleteRequest(request);
   }
+  if (request.action === 'select') {
+    return await onSelectRequest<T>(request);
+  }
+
+  return null;
 }
 
 function elementUpdated(element: IndexableType): number {
@@ -147,4 +163,224 @@ export function odDeleteRequest<T extends BaseTableType>(request: DbDelete<T>): 
   })
 }
 
-// export function onSelectRequest<T extends BaseTableType>
+function splitFilters<T extends BaseTableType, D extends BaseFilter<T>>(filters: Array<Filter<T>>, operation: FiltersOperation): {
+  filtered: Array<D>,
+  remains: Array<Filter<T>>
+} {
+  const filtered = filters.filter(f => f.operation === operation) as unknown as Array<D>;
+  const remains = filters.filter(f => f.operation !== operation);
+  return {filtered, remains};
+}
+
+function addValueFilter<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
+                                                                    filters: Array<ValueFilter<T>>,
+                                                                    queryTableFn: (whereClause: WhereClause<T, K>, values: IndexableTypeArrayReadonly) => Collection<T, K>,
+                                                                    queryCollectionFn: (element: ValueOf<T>, value: ValueOf<T>) => boolean): Collection<T, K> | Table<T, K> {
+  if (!filters.length) {
+    return query;
+  }
+
+  const columns: Array<K> = [];
+  const values: Array<ValueOf<T>> = [];
+  filters.forEach(filter => {
+    columns.push(filter.column as K);
+    values.push(filter.value);
+  });
+
+  if ('where' in query) {
+    return queryTableFn((query.where(columns) as unknown as WhereClause<T, K>), values as IndexableTypeArrayReadonly);
+  }
+  return query.filter(element => columns.every((colName, index) => queryCollectionFn(element[colName as string] as ValueOf<T>, values[index])));
+}
+
+function addEqFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
+                                                                  filters: Array<ValueFilter<T>>): Collection<T, K> | Table<T, K> {
+  return addValueFilter(query, filters,
+    (whereClause, values) => whereClause.equals(values)
+    , (element, value) => element === value);
+}
+
+function addNotEqFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
+                                                                     filters: Array<ValueFilter<T>>): Collection<T, K> | Table<T, K> {
+  return addValueFilter(query, filters,
+    (whereClause, values) => whereClause.notEqual(values),
+    (element, value) => element !== value);
+}
+
+function addGtFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
+                                                                  filters: Array<ValueFilter<T>>): Collection<T, K> | Table<T, K> {
+  return addValueFilter(query, filters,
+    (whereClause, values) => whereClause.above(values),
+    (element, value) => element > value);
+}
+
+function addGeFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
+                                                                  filters: Array<ValueFilter<T>>): Collection<T, K> | Table<T, K> {
+  return addValueFilter(query, filters,
+    (whereClause, values) => whereClause.aboveOrEqual(values),
+    (element, value) => element >= value);
+}
+
+
+function addLsFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
+                                                                  filters: Array<ValueFilter<T>>): Collection<T, K> | Table<T, K> {
+  return addValueFilter(query, filters,
+    (whereClause, values) => whereClause.below(values),
+    (element, value) => element < value);
+}
+
+function addLeFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
+                                                                  filters: Array<ValueFilter<T>>): Collection<T, K> | Table<T, K> {
+  return addValueFilter(query, filters,
+    (whereClause, values) => whereClause.belowOrEqual(values),
+    (element, value) => element <= value);
+}
+
+function addLikeFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>, filters: Array<LikeInterface<T>>): Collection<T, K> | Table<T, K> {
+  if (!filters.length) {
+    return query;
+  }
+  const columns: Array<K> = [];
+  const values: Array<RegExp> = [];
+  filters.forEach(filter => {
+    columns.push(filter.column as K);
+    values.push(filter.value);
+  });
+
+  return query.filter(obj =>
+    columns.every((column, index) => {
+      const element = obj[column as string] as string;
+      const value = values[index];
+      return value.test(element);
+    })
+  );
+}
+
+function addCollectionFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
+                                                                          filters: Array<CollectionFilter<T>>,
+                                                                          queryTableFn: (whereClause: WhereClause<T, K>, values: NonEmptyArray<ValueOf<T>>) => Collection<T, K>,
+                                                                          queryCollectionFn: (element: ValueOf<T>, value: ValueOf<T>) => boolean): Collection<T, K> | Table<T, K> {
+  if (!filters.length) {
+    return query;
+  }
+  for (let index = 0; index < filters.length; index++) {
+    const filter = filters[index];
+    const fieldName = filter.column as string;
+    const values = filter.values;
+
+    if ('where' in query && index === 0) {
+      query = queryTableFn((query.where(fieldName) as unknown as WhereClause<T, K>), values)
+    }
+    query = query.filter(obj => {
+      const value = obj[fieldName] as ValueOf<T>;
+      for (const val of values) {
+        if (queryCollectionFn(value, val)) {
+          return true;
+        }
+      }
+      return false;
+    })
+  }
+
+  return query;
+}
+
+
+function addInFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>, filters: Array<CollectionFilter<T>>): Collection<T, K> | Table<T, K> {
+  return addCollectionFilters(query, filters,
+    (whereClause, values) => whereClause.anyOf(values),
+    (element, value) => element === value)
+}
+
+function addNotInFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>, filters: Array<CollectionFilter<T>>): Collection<T, K> | Table<T, K> {
+  return addCollectionFilters(query, filters,
+    (whereClause, values) => whereClause.noneOf(values),
+    (element, value) => element !== value)
+}
+
+const operations: Array<{ operation: FiltersOperation, fn: Function }> = [
+  {
+    operation: 'eq',
+    fn: addEqFilters,
+  }, {
+    operation: 'not_eq',
+    fn: addNotEqFilters,
+  }, {
+    operation: 'gt',
+    fn: addGtFilters,
+  }, {
+    operation: 'ge',
+    fn: addGeFilters,
+  }, {
+    operation: 'ls',
+    fn: addLsFilters,
+  }, {
+    operation: 'le',
+    fn: addLeFilters,
+  }, {
+    operation: 'in',
+    fn: addInFilters,
+  }, {
+    operation: 'not_in',
+    fn: addNotInFilters,
+  }, {
+    operation: 'like',
+    fn: addLikeFilters,
+  },
+] as const;
+
+function addFilters<T extends BaseTableType, K = IndexableType>(table: Table<T, K>, filters: NonEmptyArray<Filter<T>>): Collection<T, K> | Table<T, K> {
+
+  let query: Table<T, K> | Collection<T, K> = table;
+  let remainingFilters: Array<Filter<T>> = filters;
+  for (const operation of operations) {
+    const operationFilter = splitFilters(remainingFilters, operation.operation);
+    query = operation.fn(query, operationFilter.filtered);
+    remainingFilters = operationFilter.remains;
+  }
+  return table;
+}
+
+export async function onSelectRequest<T extends BaseTableType, K = IndexableType>(request: DbSelect<T>): Promise<DbSelectResponse<T>> {
+  const db = AppDB.getDb();
+  const {table, result, order, filters, paginator} = request;
+
+  const tableData = db.getTable(table) as Table<T, K>;
+  let query: Collection<T, K> | Table<T, K> = tableData;
+  if (filters) {
+    query = addFilters(tableData, filters);
+  }
+
+  if (result === 'count') {
+    const count = await query.count();
+    return {action: 'select', count, table};
+  }
+
+  let res: Array<T> | null = null;
+  if (order) {
+    if (order.type === 'des') {
+      query = query.reverse()
+    }
+    if ('orderBy' in query) {
+      query = query.orderBy(order.column as string)
+    } else if ('sortBy') {
+      res = await query.sortBy(order.column as string)
+    }
+  }
+
+  if (paginator) {
+    const {page, pageSize} = paginator;
+
+    if (!res) {
+      query = query.offset(page * pageSize).limit(pageSize);
+    } else {
+      res = res.slice(page * pageSize, (page + 1) * pageSize);
+    }
+  }
+
+  if (!res) {
+    res = await query.toArray();
+  }
+
+  return {action: 'select', table, result: res}
+}

@@ -36,9 +36,11 @@ export interface DbDelete<T extends BaseTableType> extends DbBaseRequest {
   key: OneOrMulti<ValueOf<T>>;
 }
 
-interface BaseFilter<T extends BaseTableType> {
+export type FiltersOperation = 'eq' | 'not_eq' | 'like' | 'gt' | 'ge' | 'ls' | 'le' | 'in' | 'not_in';
+
+export interface BaseFilter<T extends BaseTableType> {
   column: KeyOfObj<T>;
-  operation: 'eq' | 'not_eq' | 'like' | 'gt' | 'ge' | 'ls' | 'le' | 'in' | 'not_in';
+  operation: FiltersOperation;
 }
 
 export interface ValueFilter<T extends BaseTableType> extends BaseFilter<T> {
@@ -48,7 +50,7 @@ export interface ValueFilter<T extends BaseTableType> extends BaseFilter<T> {
 
 export interface LikeInterface<T extends BaseTableType> extends BaseFilter<T> {
   operation: 'like';
-  value: string;
+  value: RegExp;
 }
 
 export interface CollectionFilter<T extends BaseTableType> extends BaseFilter<T> {
@@ -63,17 +65,15 @@ export interface Paginator {
   pageSize: number;
 }
 
-
-// TODO: COUNT
 export interface DbSelect<T extends BaseTableType> extends DbBaseRequest {
   action: 'select';
-  order?: KeyOfObj<T>;
+  result?: 'count' | 'data';
+  order?: { column: KeyOfObj<T>, type?: 'asc' | 'des' };
   filters?: NonEmptyArray<Filter<T>>;
   paginator?: Paginator;
 }
 
 export type DbRequest<T extends BaseTableType> = DbInsert<T> | DbUpdate<T> | DbDelete<T> | DbSelect<T>;
-
 
 interface DbBaseResponse {
   table: string;
@@ -89,10 +89,17 @@ export interface DbDeleteResponse extends DbBaseResponse {
   action: 'delete';
 }
 
-export interface DbSelectResponse<T extends BaseTableType> extends DbBaseResponse {
+export interface DbSelectDataResponse<T extends BaseTableType> extends DbBaseResponse {
   action: 'select';
   result: Array<T>;
 }
+
+export interface DbSelectCountResponse extends DbBaseResponse {
+  action: 'select';
+  count: number;
+}
+
+export type DbSelectResponse<T extends BaseTableType> = DbSelectDataResponse<T> | DbSelectCountResponse;
 
 export interface DbErrorResponse extends DbBaseResponse {
   action: 'error';

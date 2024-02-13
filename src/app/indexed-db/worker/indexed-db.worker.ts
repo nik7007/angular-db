@@ -1,20 +1,22 @@
 /// <reference lib="webworker" />
 
 import {onRequest} from "../indexed-db.util";
-import type {BaseTableType, DbRequest} from "../indexed-db.model";
+import {BaseTableType, DbErrorResponse, DbRequest} from "../indexed-db.model";
 
 addEventListener('message', async (event?: MessageEvent<DbRequest<BaseTableType>>) => {
   if (!event) {
-    postMessage('');
+    postMessage({table: '', action: 'error', message: 'Empty event!'});
     return;
   }
   const {data} = event;
   try {
-    await onRequest(data);
+    const response = await onRequest(data);
 
-    postMessage('All done!');
+    postMessage(response);
   } catch (e) {
-    postMessage('Errors!');
+    console.log(e);
+    const resError: DbErrorResponse = {table: data.table, action: 'error', message: `${e}`}
+    postMessage(resError);
   }
 });
 
