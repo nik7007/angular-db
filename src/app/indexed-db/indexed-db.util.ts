@@ -1,4 +1,4 @@
-import Dexie, {Collection, IndexableType, IndexableTypeArrayReadonly, Table, WhereClause} from "dexie";
+import Dexie, {Collection, IndexableType, Table, WhereClause} from "dexie";
 import {
   BaseFilter,
   BaseTableType,
@@ -41,7 +41,7 @@ export class AppDB extends Dexie {
 
   public static getDb(): AppDB {
     if (!AppDB.db) {
-      AppDB.db = new AppDB('app-db', [{version: 1, schema: {data: 'name'}}]);
+      AppDB.db = new AppDB('app-db', [{version: 1, schema: {data: 'name, info, n, d'}}]);
     }
     return AppDB.db;
 
@@ -174,7 +174,10 @@ function splitFilters<T extends BaseTableType, D extends BaseFilter<T>>(filters:
 
 function addValueFilter<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
                                                                     filters: Array<ValueFilter<T>>,
-                                                                    queryTableFn: (whereClause: WhereClause<T, K>, values: IndexableTypeArrayReadonly) => Collection<T, K>,
+                                                                    queryTableFn: (table: Table<T, K>, elements: {
+                                                                      columns: Array<K>,
+                                                                      values: Array<ValueOf<T>>
+                                                                    }) => Collection<T, K>,
                                                                     queryCollectionFn: (element: ValueOf<T>, value: ValueOf<T>) => boolean): Collection<T, K> | Table<T, K> {
   if (!filters.length) {
     return query;
@@ -188,7 +191,8 @@ function addValueFilter<T extends BaseTableType, K = IndexableType>(query: Table
   });
 
   if ('where' in query) {
-    return queryTableFn((query.where(columns) as unknown as WhereClause<T, K>), values as IndexableTypeArrayReadonly);
+    const table = query as Table<T, K>;
+    return queryTableFn(table, {columns, values});
   }
   return query.filter(element => columns.every((colName, index) => queryCollectionFn(element[colName as string] as ValueOf<T>, values[index])));
 }
@@ -196,44 +200,96 @@ function addValueFilter<T extends BaseTableType, K = IndexableType>(query: Table
 function addEqFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
                                                                   filters: Array<ValueFilter<T>>): Collection<T, K> | Table<T, K> {
   return addValueFilter(query, filters,
-    (whereClause, values) => whereClause.equals(values)
+    (table, {columns, values}) => {
+      const eqObj: Record<string, ValueOf<T>> = {};
+      columns.forEach((column, index) => {
+        eqObj[column as string] = values[index];
+      });
+      return table.where(eqObj);
+    }
     , (element, value) => element === value);
 }
 
 function addNotEqFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
                                                                      filters: Array<ValueFilter<T>>): Collection<T, K> | Table<T, K> {
+  let fn = (element: ValueOf<T>, value: ValueOf<T>) => element !== value;
   return addValueFilter(query, filters,
-    (whereClause, values) => whereClause.notEqual(values),
-    (element, value) => element !== value);
+    (table, {columns, values}) => {
+      const firstColumn = columns.shift() as K;
+      const firstValue = values.shift() as ValueOf<T>;
+      let collection: Collection<T, K> = table.where(firstColumn as string).notEqual(firstValue);
+      if (columns.length) {
+        collection = collection.filter(element => columns.every((colName, index) => fn(element[colName as string] as ValueOf<T>, values[index])));
+      }
+      return collection;
+    },
+    fn);
 }
 
 function addGtFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
                                                                   filters: Array<ValueFilter<T>>): Collection<T, K> | Table<T, K> {
+
+  const fn = (element: ValueOf<T>, value: ValueOf<T>) => element > value;
   return addValueFilter(query, filters,
-    (whereClause, values) => whereClause.above(values),
-    (element, value) => element > value);
+    (table, {columns, values}) => {
+      const firstColumn = columns.shift() as K;
+      const firstValue = values.shift() as ValueOf<T>;
+      let collection: Collection<T, K> = table.where(firstColumn as string).above(firstValue);
+      if (columns.length) {
+        collection = collection.filter(element => columns.every((colName, index) => fn(element[colName as string] as ValueOf<T>, values[index])));
+      }
+      return collection;
+    },
+    fn);
 }
 
 function addGeFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
                                                                   filters: Array<ValueFilter<T>>): Collection<T, K> | Table<T, K> {
+  const fn = (element: ValueOf<T>, value: ValueOf<T>) => element >= value;
   return addValueFilter(query, filters,
-    (whereClause, values) => whereClause.aboveOrEqual(values),
-    (element, value) => element >= value);
+    (table, {columns, values}) => {
+      const firstColumn = columns.shift() as K;
+      const firstValue = values.shift() as ValueOf<T>;
+      let collection: Collection<T, K> = table.where(firstColumn as string).aboveOrEqual(firstValue);
+      if (columns.length) {
+        collection = collection.filter(element => columns.every((colName, index) => fn(element[colName as string] as ValueOf<T>, values[index])));
+      }
+      return collection;
+    },
+    fn);
 }
 
 
 function addLsFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
                                                                   filters: Array<ValueFilter<T>>): Collection<T, K> | Table<T, K> {
+  const fn = (element: ValueOf<T>, value: ValueOf<T>) => element < value;
   return addValueFilter(query, filters,
-    (whereClause, values) => whereClause.below(values),
-    (element, value) => element < value);
+    (table, {columns, values}) => {
+      const firstColumn = columns.shift() as K;
+      const firstValue = values.shift() as ValueOf<T>;
+      let collection: Collection<T, K> = table.where(firstColumn as string).below(firstValue);
+      if (columns.length) {
+        collection = collection.filter(element => columns.every((colName, index) => fn(element[colName as string] as ValueOf<T>, values[index])));
+      }
+      return collection;
+    },
+    fn);
 }
 
 function addLeFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>,
                                                                   filters: Array<ValueFilter<T>>): Collection<T, K> | Table<T, K> {
+  const fn = (element: ValueOf<T>, value: ValueOf<T>) => element <= value;
   return addValueFilter(query, filters,
-    (whereClause, values) => whereClause.belowOrEqual(values),
-    (element, value) => element <= value);
+    (table, {columns, values}) => {
+      const firstColumn = columns.shift() as K;
+      const firstValue = values.shift() as ValueOf<T>;
+      let collection: Collection<T, K> = table.where(firstColumn as string).belowOrEqual(firstValue);
+      if (columns.length) {
+        collection = collection.filter(element => columns.every((colName, index) => fn(element[colName as string] as ValueOf<T>, values[index])));
+      }
+      return collection;
+    },
+    fn);
 }
 
 function addLikeFilters<T extends BaseTableType, K = IndexableType>(query: Table<T, K> | Collection<T, K>, filters: Array<LikeInterface<T>>): Collection<T, K> | Table<T, K> {
@@ -269,7 +325,7 @@ function addCollectionFilters<T extends BaseTableType, K = IndexableType>(query:
     const values = filter.values;
 
     if ('where' in query && index === 0) {
-      query = queryTableFn((query.where(fieldName) as unknown as WhereClause<T, K>), values)
+      query = queryTableFn((query.where(fieldName)), values)
     }
     query = query.filter(obj => {
       const value = obj[fieldName] as ValueOf<T>;
@@ -337,8 +393,11 @@ function addFilters<T extends BaseTableType, K = IndexableType>(table: Table<T, 
     const operationFilter = splitFilters(remainingFilters, operation.operation);
     query = operation.fn(query, operationFilter.filtered);
     remainingFilters = operationFilter.remains;
+    if (!remainingFilters?.length) {
+      break;
+    }
   }
-  return table;
+  return query;
 }
 
 export async function onSelectRequest<T extends BaseTableType, K = IndexableType>(request: DbSelect<T>): Promise<DbSelectResponse<T>> {
