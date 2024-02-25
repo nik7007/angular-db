@@ -4,7 +4,7 @@ import {onRequest} from "../indexed-db.util";
 import {BaseTableType, DbErrorResponse, DbRequest} from "../indexed-db.model";
 
 addEventListener('message', async (event?: MessageEvent<DbRequest<BaseTableType>>) => {
-  if (!event) {
+  if (!event?.data) {
     postMessage({table: '', action: 'error', message: 'Empty event!'});
     return;
   }
